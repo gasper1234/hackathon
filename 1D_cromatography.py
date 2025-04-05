@@ -66,7 +66,11 @@ n = 25
 x = np.linspace(0, 1, n)
 dx = x[1] - x[0]
 N_species = 2
+# vrsta, medij, odvod, pozicija
 conc = np.zeros((N_species, 3, 3, n))
+outflow = np.zeros((N_species))
+all_conc_0 = []
+all_outflows = [[] for _ in range(N_species)]
 
 # parameters
 u = 0.1
@@ -105,6 +109,8 @@ while t < t_max:
         q_star = get_q_star(conc[i, 0, 0], A_q, B_q)
         time_der_q = time_derivative_q(conc[i, 2, 0], q_star, k_q)
         conc[i, 2, 1] = time_der_q
+        outflow[i] += u * conc[i, 0, 0, -1] * dt
+        all_outflows[i].append(outflow[i])
 
 
         conc[i, 0, 0] = time_step(conc[i, 0, 0], time_der, dt)
@@ -112,26 +118,41 @@ while t < t_max:
         conc[i, 2, 0] = time_step(conc[i, 2, 0], time_der_q, dt)
 
         # concentratio at zero always1
-        conc[i, 0, 0][0] = 1
+        conc[i, 0, 0, 0] = 1 - outflow[i] - np.sum(conc[i, 0, 0, 1:]) * dx
+        all_conc_0.append(conc[i, 0, 0, 0])
 
+    # plot 5 times during simulation
+    if int(t / dt) % int(t_max/dt//5) == 0:
+        fig, ax = plt.subplots(3, 1)
+        ax[0].plot(all_conc_0, label='conc_0')
+        ax[0].legend()
+        for i in range(N_species):
+            ax[1].plot(all_outflows[i], label='outflow ' + str(i))
+        ax[1].legend()
+        # purity
+        sum_outflows = np.sum(np.array(all_outflows), axis=0)
+        purity = np.array(all_outflows[0]) / sum_outflows
+        ax[2].plot(purity, label='purity')
+        plt.title('t = ' + str(t))
+        plt.show()
+        # plot
+        fig, ax = plt.subplots(N_species, 3)
+        for i in range(N_species):
+            ax[i, 0].plot(x, conc[i, 0, 0], label='medij')
+            ax[i, 0].plot(x, conc[i, 1, 0], label='inter')
+            ax[i, 0].plot(x, conc[i, 2, 0], label='vezan')
+            ax[i, 0].legend()
+            # plot derivatives
+            ax[i, 1].plot(x, conc[i, 0, 1], label='medij')
+            ax[i, 1].plot(x, conc[i, 1, 1], label='inter')
+            ax[i, 1].plot(x, conc[i, 2, 1], label='vezan')
+            ax[i, 1].legend()
+            # plot second derivatives
+            ax[i, 2].plot(x, conc[i, 0, 2], label='medij')
+            ax[i, 2].plot(x, conc[i, 1, 2], label='inter')
+            ax[i, 2].plot(x, conc[i, 2, 2], label='vezan')
+            ax[i, 2].legend()
+        plt.show()
     t += dt
 
-# plot
-fig, ax = plt.subplots(N_species, 3)
-for i in range(N_species):
-    ax[i, 0].plot(x, conc[i, 0, 0], label='medij')
-    ax[i, 0].plot(x, conc[i, 1, 0], label='inter')
-    ax[i, 0].plot(x, conc[i, 2, 0], label='vezan')
-    ax[i, 0].legend()
-    # plot derivatives
-    ax[i, 1].plot(x, conc[i, 0, 1], label='medij')
-    ax[i, 1].plot(x, conc[i, 1, 1], label='inter')
-    ax[i, 1].plot(x, conc[i, 2, 1], label='vezan')
-    ax[i, 1].legend()
-    # plot second derivatives
-    ax[i, 2].plot(x, conc[i, 0, 2], label='medij')
-    ax[i, 2].plot(x, conc[i, 1, 2], label='inter')
-    ax[i, 2].plot(x, conc[i, 2, 2], label='vezan')
-    ax[i, 2].legend()
-plt.show()
     
