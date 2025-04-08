@@ -69,15 +69,17 @@ N_species = 2
 # vrsta, medij, odvod, pozicija
 conc = np.zeros((N_species, 3, 3, n))
 outflow = np.zeros((N_species))
-all_conc_0 = []
+all_conc_0 = [[] for _ in range(N_species)]
 all_outflows = [[] for _ in range(N_species)]
+# concetration throughout the simulation at the end of the column
+all_conc_out = [[] for _ in range(N_species)]
 
 # parameters
-u = 0.1
+u = 0.5
 D = (0.02, 0.01)
-alpha = (0.1, 0.1)
+alpha = (0.2, 0.1)
 q_star = 1
-absorb_rate = 0.1
+absorb_rate = (0.2, 0.1)
 k_q = 0.01
 B_q = 1.0
 A_q = 1.0 # a je maks 1
@@ -89,10 +91,13 @@ conc[:, 0, 0, 0] = 1
 # propagation
 dt = 0.0005
 t = 0
-t_max = 20.0
+t_max = 40.0
 
 while t < t_max:
     for i in range(N_species):
+        # Boundary conditions
+        conc[i, 0, 0, -1] = conc[i, 0, 0, -2]
+
         # update derivatives
         first_derivative(conc[i, 0, 0], conc[i, 0, 1], dx)
         second_derivative(conc[i, 0, 0], conc[i, 0, 2], dx)
@@ -101,11 +106,11 @@ while t < t_max:
         second_derivative(conc[i, 1, 0], conc[i, 1, 2], dx)
 
         # derivative zero for the last point
-        # conc[i, 0, 1][-1] = 0
+        # conc[i, 0, 1, -1] = 0
 
     for i in range(N_species):
         time_der = time_derivative(conc[i, 0, 0], conc[i, 0, 1], conc[i, 0, 2], conc[i, 1, 0], (u, D[i], alpha[i]))
-        time_der_inter = time_derivative_p(conc[i, 0, 0], conc[i, 1, 0], conc[i, 2, 0], absorb_rate)
+        time_der_inter = time_derivative_p(conc[i, 0, 0], conc[i, 1, 0], conc[i, 2, 1], absorb_rate[i])
         q_star = get_q_star(conc[i, 0, 0], A_q, B_q)
         time_der_q = time_derivative_q(conc[i, 2, 0], q_star, k_q)
         conc[i, 2, 1] = time_der_q
@@ -117,12 +122,18 @@ while t < t_max:
         conc[i, 1, 0] = time_step(conc[i, 1, 0], time_der_inter, dt)
         conc[i, 2, 0] = time_step(conc[i, 2, 0], time_der_q, dt)
 
-        # concentratio at zero always1
-        conc[i, 0, 0, 0] = 1 - outflow[i] - np.sum(conc[i, 0, 0, 1:]) * dx
-        all_conc_0.append(conc[i, 0, 0, 0])
+        # concentratio at zero
+
+        conc[i, 0, 0, 0] = 1 - outflow[i]/2 - np.sum(conc[i, 0, 0, 1:]) * dx/2 - np.sum(conc[i, 1, 0]) * dx/2 - np.sum(conc[i, 2, 0]) * dx/2
+        all_conc_0[i].append(conc[i, 0, 0, 0])
+        all_conc_out[i].append(conc[i, 0, 0, -1])
 
     # plot 5 times during simulation
-    if int(t / dt) % int(t_max/dt//5) == 0:
+    
+    # if int(t / dt) % int(t_max/dt//1) == 0:
+    # plot at final step
+    if t >= t_max - dt:
+        '''
         fig, ax = plt.subplots(3, 1)
         ax[0].plot(all_conc_0, label='conc_0')
         ax[0].legend()
@@ -135,6 +146,7 @@ while t < t_max:
         ax[2].plot(purity, label='purity')
         plt.title('t = ' + str(t))
         plt.show()
+        '''
         # plot
         fig, ax = plt.subplots(N_species, 3)
         for i in range(N_species):
@@ -153,6 +165,19 @@ while t < t_max:
             ax[i, 2].plot(x, conc[i, 2, 2], label='vezan')
             ax[i, 2].legend()
         plt.show()
+    
     t += dt
+
+# plot all_conc_out
+    
+fig, ax = plt.subplots(2, 1)
+for i in range(N_species):
+    ax[0].plot(all_conc_out[i], label='species ' + str(i))
+    ax[1].plot(all_conc_0[i], label='species ' + str(i))
+ax[0].set_title('bottom concentration')
+ax[1].set_title('top concentration')
+ax[0].legend()
+ax[1].legend()
+plt.show()
 
     
