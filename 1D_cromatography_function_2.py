@@ -61,30 +61,41 @@ def time_step(f, df, dt):
     return f + dt * df
 
 
-def time_propagation_sol(conc_soli, zac):
-    for i in range(3):
+def time_propagation_sol(conc_soli, zac,u):
+    for i in range(2):
         conc_soli[i, 0, -1] = conc_soli[i, 0, -2]
         first_derivative(conc_soli[i, 0], conc_soli[i, 1], dx)
         second_derivative(conc_soli[i, 0], conc_soli[i, 2], dx)
         time_der = time_derivative(conc_soli[i,0], conc_soli[i,1], conc_soli[i,2], 0, (u, D_soli[0], 0))   
         conc_soli[i, 0] = time_step(conc_soli[i,0], time_der, dt)
-    for i in range(3):
+    for i in range(2):
         conc_soli[i, 0, 0] = zac[i]
     return conc_soli
 
 def racunanje_pH(conc_soli, K_eq):
-    c_h = K_eq * conc_soli[1, 0] / conc_soli[2, 0]
+    c_h = K_eq * conc_soli[0, 0] / conc_soli[1, 0]
     pH = -np.log10(c_h)
     return pH
 
 
 
-def propagate(const, const_sol, u, D, alpha, absorb_rate, k_q, A_q, B_q, t_0, t_max, delez_smole,zac_conc,zac_soli, dt):
+def propagate(const, const_sol, u_array, D, alpha, absorb_rate, k_q, A_q, B_q, 
+              t_0, t_max, delez_smole, zac_conc, zac_soli_array, dt):
     N_species = len(alpha)
+    outflow = np.zeros((N_species))
+    all_conc_0 = [[] for _ in range(N_species)]
+    all_outflows = [[] for _ in range(N_species)]
+    # concetration throughout the simulation at the end of the column
+    all_conc_out = [[] for _ in range(N_species)]
     dx = 1/(const.shape[3]-1)
     t = t_0
+
+    time_index = int(t)  # Get index for current hour
+    zac_soli = zac_soli_array[time_index]
+    u = u_array[time_index]
+
     while t < t_max:
-        time_propagation_sol(conc_soli, zac_soli)
+        time_propagation_sol(conc_soli, zac_soli, u)
 
         for i in range(N_species):
             # Boundary conditions
@@ -113,49 +124,53 @@ def propagate(const, const_sol, u, D, alpha, absorb_rate, k_q, A_q, B_q, t_0, t_
             conc[i, 2, 0] = time_step(conc[i, 2, 0], time_der_q, dt)
 
             # concentration at zero
-            conc[i, 0, 0, 0] = zac_conc[i] - outflow[i]/(1-delez_smole) - np.sum(conc[i, 0, 0, 1:]) * dx/(1-delez_smole) - np.sum(conc[i, 1, 0]) * dx/delez_smole - np.sum(conc[i, 2, 0]) * dx/delez_smole
+            conc[i, 0, 0, 0] = zac_conc[i] - outflow[i] - np.sum(conc[i, 0, 0, 1:]) * dx/(1-delez_smole) - np.sum(conc[i, 1, 0]) * dx/delez_smole - np.sum(conc[i, 2, 0]) * dx/delez_smole
             all_conc_0[i].append(conc[i, 0, 0, 0])
             all_conc_out[i].append(conc[i, 0, 0, -1])
 
         t += dt
-    return all_outflows
+        ucinkovitost = np.zeros_like(all_outflows)
+        for i in range(N_species):
+            ucinkovitost[i] = all_outflows[i] / (np.ones_like(all_outflows[i]) * zac_conc[i])
+
+        zelen_protein = all_outflows[0]
+        vsi_proteini = np.zeros_like(all_outflows[0])
+        for i in range(N_species):
+            vsi_proteini +=  all_outflows[i]
+        cistost = zelen_protein/vsi_proteini
+
+
+    return (all_outflows, ucinkovitost, cistost)
 
 
 
 
 # quantities: two concetrations and their first and second derivatives on 1D grid
 
-n = 25
+n = 25 #število krajevnih korakov
 x = np.linspace(0, 1, n)
 dx = x[1] - x[0]
-N_species = 2
+N_species = 2 #št proteinov oopazovanih
 # vrsta, medij, odvod, pozicija
-conc = np.zeros((N_species, 3, 3, n))
-conc_soli = np.zeros((3,3,n))
-outflow = np.zeros((N_species))
-all_conc_0 = [[] for _ in range(N_species)]
-all_outflows = [[] for _ in range(N_species)]
-# concetration throughout the simulation at the end of the column
-all_conc_out = [[] for _ in range(N_species)]
+conc = np.zeros((N_species, 3, 3, n)) #koncentracije proteinov v koloni
+conc_soli = np.zeros((3,3,n)) #koncentracie ionov in kisline v koloni
 
-
-u = 0.2 #hitrost medija itzven kolone
-D = (0.02, 0.01)
-D_soli = (0.005, 0.005, 0.001) # last 2: no diffusion (Cl-, A-) ne rabim v preprostem modelu
+D = (0.02, 0.01) # difuzijski koeficienti soli
+D_soli = (0.005, 0.005) # last 2: no diffusion (Cl-, A-) ne rabim v preprostem modelu
 n = 10 # pri računanju q_star
 delez_smole = 0.5
-absorb_rate = (0.02, 0.01)
+absorb_rate = (0.02, 0.01) #za absorbcijo proteinov na smolo
 
 alpha = []
 for i in range(N_species):
     alpha.append(absorb_rate[i]*delez_smole/(1-delez_smole))
 
 #dejanska hitrost medija: v koloni lahko večja zaradi smole ki zasede veloko prostora
-u = u/(1-delez_smole)
-zac_conc = (1, 1) # zacetna koncentracija proteinov
+
+zac_conc = (1, 3) # zacetna koncentracija proteinov
 
 k_q = 0.01 # hitrost vezave na smolo
-B_q = 1.0 # neki odvisno od ph
+B_q = 1.0 # neki 
 A_q = 1.0 #max koliko se veže na smolo
 eps = 1.0 #
 
@@ -170,52 +185,38 @@ conc[1, 0, 0, 0] = zac_conc[1]   # Protein B
 # tu začnemo s stacionarnim stanjem
 koncentracija_soli = 0.2
 koncentracija_kisline = 0.1
-conc_soli[0, 0] = koncentracija_soli    # Na+
-conc_soli[1, 0] = koncentracija_soli    # Acetate (A-)
-conc_soli[2, 0] = koncentracija_kisline # koncentracija kisline
 
-# ---- Simulation Loop ----
-
-dt = 0.0001
-t = 0
-t_max = 10.0
-
-
-# parameters
-u = 0.1
-D = (0.01, 0.01)
-absorb_rate = (0.2, 0.001)
-q_star = 1
-delez_smole = 0.8
-alpha = tuple()
-zac_conc = (1,1) 
-for i in absorb_rate:
-    rate = (delez_smole) / (1-delez_smole) * i
-    alpha += (rate,) 
-k_q = 0.01
-B_q = 1.0
-A_q = 1.0 # a je maks 1
-
-
-# initial conditions
-conc[:, 0, 0, 0] = 1
+conc_soli[0, 0] = koncentracija_soli    # sol
+conc_soli[1, 0] = koncentracija_kisline # koncentracija kisline
 
 # times
-dt = 0.00017
+dt = 0.0002
 t_0 = 0
-t_max = 20.0
-zac_soli = [conc_soli[0,0,0], conc_soli[1,0,0], conc_soli[2,0,0]]
-print(zac_soli)
+t_max = 2.0
+#/(1-delez_smole)
+u_array = np.linspace(0.2, 1.7, int(t_max))/(1-delez_smole)  # hitrosti sem dal da se lahko spremenijo enkrat na časovno enoto tukaj določiš profil
+
+arr1 = np.tile(np.array([[0.2, 0.1]]), (int(t_max)//2, 1))
+arr2 = np.tile(np.array([[0.3, 0.05]]), (int(t_max)//2, 1))
+
+zac_soli_array = np.vstack((arr1, arr2))
+
+#zac_soli_array = np.tile(np.array([[0.2, 0.1]]), (int(t_max), 1)) # enkrat na časovno enoto lahko spremeniš koncentracije ionov in kisline na začetku kolone
+
 # vse se uravnava tukaj, propagate vrne to kar gre ven in posodobi seznam koncentracij
-outflows = propagate(conc,conc_soli, u, D, alpha, absorb_rate, k_q, A_q, B_q, t_0, t_max,delez_smole,zac_conc,  zac_soli, dt)
+outflows = propagate(conc,conc_soli, u_array, D, alpha, absorb_rate, k_q, A_q, B_q, t_0, t_max,delez_smole,zac_conc,  zac_soli_array, dt)
+
+
 
 # plot
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(3,1)
 for i in range(N_species):
-    ax.plot(outflows[i], label=f'Species {i+1}')
+    ax[0].plot(outflows[0][i], label=f'Species {i+1}')
+    ax[1].plot(outflows[1][i], label=f'Species {i+1}')
+ax[2].plot(outflows[2])
 
-ax.set_xlabel('Time')
-ax.set_ylabel('Outflow')
+ax[0].set_xlabel('Time')
+ax[0].set_ylabel('Outflow')
+ax[1].set_ylabel('yield')
 plt.show()
-
     
